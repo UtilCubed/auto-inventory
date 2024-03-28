@@ -16,10 +16,10 @@
 	"environment": "*",
 	"entrypoints": {
 		"main": [
-			"cubed.autoinventory.AutoInventory"
+			"com.github.utilcubed.autoinventory.AutoInventory"
 		],
 		"client": [
-			"cubed.autoinventory.AutoInventoryClient"
+			"com.github.utilcubed.autoinventory.AutoInventoryClient"
 		]
 	},
 	"mixins": [

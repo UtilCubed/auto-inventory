@@ -1,4 +1,4 @@
-package cubed.autoinventory;
+package com.github.utilcubed.autoinventory;
 
 import net.fabricmc.api.ModInitializer;
 

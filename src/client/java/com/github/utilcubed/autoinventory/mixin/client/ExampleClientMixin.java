@@ -1,4 +1,4 @@
-package cubed.autoinventory.mixin.client;
+package com.github.utilcubed.autoinventory.mixin.client;
 
 import net.minecraft.client.MinecraftClient;
 import org.spongepowered.asm.mixin.Mixin;
