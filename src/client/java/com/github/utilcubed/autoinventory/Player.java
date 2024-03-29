@@ -2,11 +2,13 @@ package com.github.utilcubed.autoinventory;
 
 import java.util.logging.Logger;
 
+import net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents.Command;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerInteractionManager;
+import net.minecraft.command.argument.EntityAnchorArgumentType.EntityAnchor;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.Item;
@@ -14,6 +16,7 @@ import net.minecraft.item.Items;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
+import net.minecraft.util.BlockRotation;
 import net.minecraft.util.Hand;
 import net.minecraft.util.dynamic.Range;
 import net.minecraft.util.hit.BlockHitResult;
@@ -23,21 +26,34 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 
 public class Player {
-    private int weaponSlot = 0;
-    private int toolSlot = 1;
-    private int firstUtilitySlot = 7;
-    private int secondUtilitySlot = 8;
+    private final int weaponSlot = 0;
+    private final int toolSlot = 1;
+    private final int firstUtilitySlot = 7;
+    private final int secondUtilitySlot = 8;
     private int enderChestSlot = -1;
     private int shieldSlot = -1;
     private int bowSlot = -1;
     private int foodSlot = -1;
 
     private int openContainer_phase = 0;
-    private int openContainer_y = 0;
+    private Integer openContainer_y = null;
 
-    public void update(MinecraftClient client) {
+    private int elytra_landedTickCountdown = 0;
+
+    public void startUpdate(MinecraftClient client) {
+
         if (openContainer_phase > 0) {
             openContainerUpdate(client);
+        }
+
+        if (elytra_landedTickCountdown > 1) {
+            elytra_landedTickCountdown--;
+        } else if (elytra_landedTickCountdown == 1) {
+            if (client == null || client.player == null || client.currentScreen != null)
+                return;
+
+            findItemAndSwapTo(client, Items.TORCH, secondUtilitySlot);
+            elytra_landedTickCountdown = 0;
         }
     }
 
@@ -95,8 +111,11 @@ public class Player {
 
             // If solid
             if (targetedBlock != null || !targetedBlock.isAir() && targetedBlock.isSolid()) {
-                client.options.useKey.setPressed(false);
-                findItemAndSwapTo(client, Items.TORCH, secondUtilitySlot);
+                // If torch
+                if (player.getMainHandStack().getItem() == Items.FIREWORK_ROCKET) {
+                    client.options.useKey.setPressed(false);
+                    findItemAndSwapTo(client, Items.TORCH, secondUtilitySlot);
+                }
             }
 
         }
@@ -119,7 +138,7 @@ public class Player {
     }
 
     public void whileUse(MinecraftClient client) {
-        
+
     }
 
     public void endUse(MinecraftClient client) {
@@ -131,6 +150,7 @@ public class Player {
         Item itemInOffhand = player.getOffHandStack().getItem();
         Item itemInMainhand = player.getMainHandStack().getItem();
 
+        // Weapon slot
         int playerSlot = player.getInventory().selectedSlot;
         if (playerSlot == weaponSlot && itemInOffhand == Items.SHIELD) {
             if (this.shieldSlot == -1)
@@ -138,20 +158,39 @@ public class Player {
 
             swap(client, shieldSlot, PlayerInventory.OFF_HAND_SLOT);
             this.shieldSlot = -1;
-        } else if (playerSlot == toolSlot && itemInMainhand == Items.BOW) {
+        }
+        // Tool slot
+        else if (playerSlot == toolSlot && itemInMainhand == Items.BOW) {
             if (this.bowSlot == -1)
                 return;
 
             swap(client, bowSlot, playerSlot);
             this.bowSlot = -1;
         }
-        else if (itemInOffhand == Items.GOLDEN_CARROT || itemInOffhand == Items.COOKED_BEEF || itemInOffhand == Items.COOKED_PORKCHOP) {
+        // Second utility slot
+        if (playerSlot == secondUtilitySlot && itemInMainhand == Items.ENDER_CHEST) {
+
+            int slot = this.enderChestSlot;
+            if (slot == -1 || slot == playerSlot)
+                slot = getSlotOfItem(client, Items.TORCH);
+            if (slot == -1) {
+                debug(client, "Nowhere to swap ender chest to");
+                return;
+            }
+
+            swap(client, slot, playerSlot);
+        }
+
+        // Offhand is food
+        if (itemInOffhand == Items.GOLDEN_CARROT || itemInOffhand == Items.COOKED_BEEF
+                || itemInOffhand == Items.COOKED_PORKCHOP) {
             if (this.foodSlot == -1)
                 return;
 
             swap(client, foodSlot, PlayerInventory.OFF_HAND_SLOT);
             this.foodSlot = -1;
         }
+
     }
 
     // Flying
@@ -159,6 +198,7 @@ public class Player {
         if (client.player == null || client.player == null || client.currentScreen != null)
             return;
 
+        elytra_landedTickCountdown = 0;
         findItemAndSwapTo(client, Items.FIREWORK_ROCKET, secondUtilitySlot);
     }
 
@@ -167,10 +207,7 @@ public class Player {
     }
 
     public void endFlying(MinecraftClient client) {
-        if (client.player == null || client.player == null || client.currentScreen != null)
-            return;
-
-        findItemAndSwapTo(client, Items.TORCH, secondUtilitySlot);
+        this.elytra_landedTickCountdown = 20;
     }
 
     // Open container key
@@ -180,23 +217,40 @@ public class Player {
 
         if (client.currentScreen == null) {
             int enderChestSlot = getSlotOfItem(client, Items.ENDER_CHEST);
+            int reach = (int) (PlayerEntity.getReachDistance(false) - 0.5);
+            BlockState targetedBlock = targetedBlockState(client, reach);
+            PlayerEntity player = client.player;
 
             // If no ender chest, end
             if (enderChestSlot == -1)
                 return;
             this.enderChestSlot = enderChestSlot;
             swap(client, enderChestSlot, secondUtilitySlot);
-            client.player.getInventory().selectedSlot = secondUtilitySlot;
+            player.getInventory().selectedSlot = secondUtilitySlot;
 
-            // If not on ground, end
-            if (client.player.isOnGround() != true)
-                return;
-            client.player.setPitch(90.0f);
-            client.player.jump();
-
+            // Check whether you need to jump
+            if (targetedBlock == null || !targetedBlock.isSolid()) {
+                if (!player.isOnGround())
+                    return;
+                lookAtBlock(client, player.getBlockPos().down(), Direction.UP);
+                player.jump();
+                openContainer_y = player.getBlockPos().getY();
+            }
+            // Edge case, already looking at chest
+            else if (targetedBlock.getBlock() == Blocks.ENDER_CHEST) {
+                openContainer_phase = 1;
+            }
+            // Look at center of block
+            else {
+                BlockHitResult blockHitResult = crosshairBlockHitResult(client, reach);
+                if (blockHitResult == null)
+                    return;
+                lookAtBlock(client, blockHitResult.getBlockPos(), blockHitResult.getSide());
+                openContainer_phase = 1;
+            }
             openContainer_phase = 5;
-            openContainer_y = client.player.getBlockPos().getY();
-        } else if (client.currentScreen != null) {
+
+        } else {
             // Future code
         }
     }
@@ -210,6 +264,12 @@ public class Player {
     }
 
     public void openContainerUpdate(MinecraftClient client) {
+        if (client.player == null || client.player.getInventory() == null || client.currentScreen != null)
+            return;
+
+        int reach = (int) PlayerEntity.getReachDistance(false);
+        PlayerEntity player = client.player;
+
         switch (openContainer_phase) {
             case 5:
                 // Swap silk touch pickaxe to toolSlot
@@ -218,35 +278,50 @@ public class Player {
                 if (silkTouchSlot == -1)
                     return;
                 swap(client, silkTouchSlot, toolSlot);
+                player.setSneaking(true);
+                break;
             case 4:
-                // If there is block below player
-                if (client.player.getBlockPos().getY() <= openContainer_y)
+                // If there is block below player or solid target block
+                if (openContainer_y != null && player.getBlockPos().getY() <= openContainer_y)
                     return;
+                if (targetedBlockState(client, reach) == null || !targetedBlockState(client, reach).isSolid())
+                    return;
+
                 openContainer_phase--;
-                interact(client, Hand.MAIN_HAND, 3);
+                interact(client, Hand.MAIN_HAND, reach);
+                this.openContainer_y = null;
                 break;
             case 3:
                 // Swap ender chest back
                 openContainer_phase--;
                 swap(client, enderChestSlot, secondUtilitySlot);
+                player.setSneaking(false);
                 break;
             case 2:
                 // Select toolSlot
                 openContainer_phase--;
-                client.player.getInventory().selectedSlot = toolSlot;
+                player.getInventory().selectedSlot = toolSlot;
             case 1:
                 // Open ender chest
-                BlockState targetedBlock = targetedBlockState(client, 3);
-                if (targetedBlock == null || targetedBlock.getBlock() != Blocks.ENDER_CHEST)
+                BlockState targetedBlock = targetedBlockState(client, reach);
+                if (targetedBlock == null || targetedBlock.getBlock() != Blocks.ENDER_CHEST) {
+                    debug(client, "Look at an ender chest");
                     return;
+                }
                 openContainer_phase--;
-                interact(client, Hand.MAIN_HAND, 3);
+                interact(client, Hand.MAIN_HAND, reach);
                 break;
             default:
                 openContainer_phase--;
                 break;
         }
     }
+
+    public void endUpdate(MinecraftClient client) {
+
+    }
+
+    // UTILITY FUNCTIONS
 
     public int getSlotOfItem(MinecraftClient client, Item item) {
         int slot = -1;
@@ -285,6 +360,8 @@ public class Player {
         if (interactionManager != null && client.player != null && client.player.getInventory() != null) {
             interactionManager.clickSlot(client.player.playerScreenHandler.syncId, from, to, SlotActionType.SWAP,
                     client.player);
+        } else {
+            debug(client, "Failed to swap");
         }
     }
 
@@ -303,36 +380,14 @@ public class Player {
         client.interactionManager.interactBlock(client.player, hand, blockHitResult);
     }
 
-    public void place(MinecraftClient client, Hand hand, int range) {
-
-        // HitResult hitResult = client.crosshairTarget;
-        // if (hitResult == null || hitResult.getType() != HitResult.Type.BLOCK)
-        // return;
-        // BlockHitResult blockHitResult = (BlockHitResult) hitResult;
-        // Vec3d hitPos = blockHitResult.getPos();
-        // Vec3d playerPos = client.player.getPos();
-        // double distance = hitPos.distanceTo(playerPos);
-        // // Check it is within range
-        // if (range != -1 && distance > range)
-        // return;
-        // // Go 1 unit closer to the player
-        // if (distance >= 1.0) {
-        // Vec3d direction = playerPos.subtract(hitPos).normalize();
-        // blockHitResult = new BlockHitResult(hitPos.add(direction),
-        // blockHitResult.getSide(),
-        // blockHitResult.getBlockPos().add(0, 1, 0), // TERRIBLE but i honestly give up
-        // blockHitResult.isInsideBlock());
-        // }
-
-        // if (client.interactionManager.interactBlock(client.player, hand,
-        // blockHitResult) == ActionResult.FAIL) {
-        // blockHitResult = new BlockHitResult(client.player.getPos(), Direction.UP,
-        // client.player.getBlockPos().down(), false);
-        // client.interactionManager.interactBlock(client.player, hand, blockHitResult);
-        // }
+    public BlockState targetedBlockState(MinecraftClient client, int range) {
+        BlockHitResult blockHitResult = crosshairBlockHitResult(client, range);
+        if (blockHitResult == null)
+            return null;
+        return client.world.getBlockState(blockHitResult.getBlockPos());
     }
 
-    public BlockState targetedBlockState(MinecraftClient client, int range) {
+    public BlockHitResult crosshairBlockHitResult(MinecraftClient client, int range) {
         HitResult hitResult = client.crosshairTarget;
         if (hitResult == null || hitResult.getType() != HitResult.Type.BLOCK)
             return null;
@@ -345,6 +400,71 @@ public class Player {
             if (distance > range)
                 return null;
         }
-        return client.world.getBlockState(blockHitResult.getBlockPos());
+        return blockHitResult;
     }
+
+    private static int lookAtBlock(MinecraftClient client, BlockPos pos) {
+        if (client == null || client.player == null)
+            return -1;
+
+        client.player.lookAt(EntityAnchor.EYES, new Vec3d(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5));
+        return 0;
+    }
+
+    private static int lookAtBlock(MinecraftClient client, Vec3d pos) {
+        if (client == null || client.player == null)
+            return -1;
+
+        double dx = Math.floor(pos.getX()) + 0.5;
+        double dy = Math.floor(pos.getY()) + 0.5;
+        double dz = Math.floor(pos.getZ()) + 0.5;
+
+        client.player.lookAt(EntityAnchor.EYES, new Vec3d(dx, dy, dz));
+        return 0;
+    }
+
+    private static int lookAtBlock(MinecraftClient client, BlockPos pos, Direction direction) {
+        if (client == null || client.player == null)
+            return -1;
+
+        double dx = pos.getX() + 0.5;
+        double dy = pos.getY() + 0.5;
+        double dz = pos.getZ() + 0.5;
+
+        switch (direction) {
+            case NORTH:
+                dz -= 0.5;
+                break;
+            case SOUTH:
+                dz += 0.5;
+                break;
+            case EAST:
+                dx += 0.5;
+                break;
+            case WEST:
+                dx -= 0.5;
+                break;
+            case UP:
+                dy += 0.5;
+                break;
+            case DOWN:
+                dy -= 0.5;
+                break;
+            default:
+                break;
+        }
+
+        client.player.lookAt(EntityAnchor.EYES, new Vec3d(dx, dy, dz));
+        return 0;
+    }
+
+    public static void debug(MinecraftClient client, Object arg) {
+        client.player.sendMessage(Text.of(arg.toString()), false);
+    }
+
+    public static void debug(MinecraftClient client, int arg) {
+        client.player.sendMessage(Text.of(Integer.toString(arg)), false);
+
+    }
+
 }

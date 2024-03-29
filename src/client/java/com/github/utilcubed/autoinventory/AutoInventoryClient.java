@@ -35,7 +35,7 @@ public class AutoInventoryClient implements ClientModInitializer {
 			if (client.player != null) {
 
 				// Update player
-				player.update(client);
+				player.startUpdate(client);
 
 				// If event is happening
 				if (client.options.attackKey.isPressed()) {
@@ -82,6 +82,8 @@ public class AutoInventoryClient implements ClientModInitializer {
 				wasUsing = client.options.useKey.isPressed();
 				wasOpeningContainer = openContainerKey.isPressed();
 				wasFlying = client.player.isFallFlying();
+
+				player.endUpdate(client);
 			}
 
 		});
